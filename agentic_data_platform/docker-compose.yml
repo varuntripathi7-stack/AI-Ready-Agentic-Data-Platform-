@@ -1,0 +1,76 @@
+services:
+  # Zookeeper - Required for Kafka coordination
+  zookeeper:   # zookeeper:- The "manager" that keeps Kafka organized
+    image: confluentinc/cp-zookeeper:7.5.0 #Download this pre-made app
+    container_name: zookeeper  #  Name it "zookeeper"
+    hostname: zookeeper # Other apps call it "zookeeper"
+    ports: # Expose port 2181 for communication
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181 # Port for clients to connect
+      ZOOKEEPER_TICK_TIME: 2000 # Basic time unit in ms
+    volumes: # Persist data and logs (Data Storage Areas)
+      - zookeeper_data:/var/lib/zookeeper/data   # Save data here
+      - zookeeper_log:/var/lib/zookeeper/log  # Save logs here 
+    networks: # Connect to the data platform network
+      - data_platform_network 
+    healthcheck: # Check if Zookeeper is running
+      test: ["CMD", "nc", "-z", "localhost", "2181"] # Check if port 2181 is open
+      interval: 10s # Check every 10 seconds
+      timeout: 5s # Wait 5 seconds for a response
+      retries: 5 # Try 5 times before marking as unhealthy
+
+  # Kafka Broker - The main Kafka server (handling message processing)
+  kafka:  # kafka:- The "worker" that handles the actual message processing
+    image: confluentinc/cp-kafka:7.5.0 # Download this pre-made app
+    container_name: kafka # Name it "kafka"
+    hostname: kafka # Other apps call it "kafka"
+    ports: # Expose ports for communication
+      - "9092:9092"  # External apps use this port
+      - "29092:29092" # Internal Docker apps use this port
+    environment: # Set up Kafka configuration
+      KAFKA_BROKER_ID: 1 # Unique ID for this Kafka broker
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181 # Connect to Zookeeper
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT # Define listener types
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092 # Advertise how to connect
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1 # Replication factor for internal topics
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1 # Minimum in-sync replicas for transaction state log
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1 # Replication factor for transaction state log
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0 # Initial delay for group rebalance
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true" # Automatically create topics when they are referenced
+    volumes: # Persist Kafka data
+      - kafka_data:/var/lib/kafka/data # Save Kafka data here
+    networks:
+      - data_platform_network # Connect to the data platform network
+    depends_on: # Ensure Zookeeper is running first
+      zookeeper:
+        condition: service_healthy # Wait for Zookeeper to be healthy before starting Kafka
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"] # Check if Kafka is responding
+      interval: 10s # Check every 10 seconds
+      timeout: 10s # Wait 10 seconds for a response
+      retries: 5 # Try 5 times before marking as unhealthy
+
+  # Kafka UI - Optional but helpful for debugging
+  kafka-ui: # kafka-ui:- A "dashboard" to visualize and manage Kafka topics, consumers, etc.
+    image: provectuslabs/kafka-ui:latest # Download this pre-made app
+    container_name: kafka-ui # Name it "kafka-ui"
+    ports: # Expose port 8080 for the UI
+      - "8080:8080"
+    environment: # Set up Kafka UI configuration
+      KAFKA_CLUSTERS_0_NAME: local # Name of the Kafka cluster in the UI
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092 # Connect to Kafka using the internal Docker port
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181 # Connect to Zookeeper
+    networks: # Connect to the data platform network
+      - data_platform_network
+    depends_on: # Ensure Kafka is running first
+      - kafka
+
+networks: # Define the network for the data platform
+  data_platform_network: # The "network" that allows all the services to communicate with each other
+    driver: bridge # Use the default bridge network driver
+
+volumes: # Define persistent storage areas for Zookeeper and Kafka
+  zookeeper_data: # zookeeper_data:- A place to save Zookeeper's data so it doesn't get lost when the container restarts
+  zookeeper_log: # zookeeper_log:- A place to save Zookeeper's logs so they don't get lost when the container restarts
+  kafka_data: # kafka_data:- A place to save Kafka's data so it doesn't get lost when the container restarts
